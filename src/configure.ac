@@ -23,9 +23,9 @@
 
 # Initialize Autoconf
 AC_PREREQ([2.63])
-AC_INIT([glamor-egl], 
-        [0.5.0],
-        [https://bugs.freedesktop.org/enter_bug.cgi?product=glamor], 
+AC_INIT([glamor-egl],
+        [0.6.0],
+        [https://bugs.freedesktop.org/enter_bug.cgi?product=xorg],
         [glamor-egl])
 
 AC_CONFIG_SRCDIR([Makefile.am])
@@ -62,10 +62,11 @@ LIBPIXMAN="pixman-1 >= 0.21.8"
 LIBEGL="egl"
 LIBGLESV2="glesv2"
 LIBGBM="gbm"
+LIBGBMv9="gbm >= 9"
 
 # Define a configure option for an alternate input module directory
 AC_ARG_WITH(xorg-module-dir,
-            AC_HELP_STRING([--with-xorg-module-dir=DIR],
+            AS_HELP_STRING([--with-xorg-module-dir=DIR],
                            [Default xorg module directory [[default=$libdir/xorg/modules]]]),
             [moduledir="$withval"],
             [moduledir="$libdir/xorg/modules"])
@@ -75,7 +76,7 @@ AC_SUBST([moduledir])
 # Define a configure option for an alternate X Server configuration directory
 sysconfigdir=`$PKG_CONFIG --variable=sysconfigdir xorg-server`
 AC_ARG_WITH(xorg-conf-dir,
-            AC_HELP_STRING([--with-xorg-conf-dir=DIR],
+            AS_HELP_STRING([--with-xorg-conf-dir=DIR],
                            [Default xorg.conf.d directory [[default=from $PKG_CONFIG xorg-server]]]),
             [configdir="$withval"],
             [configdir="$sysconfigdir"])
@@ -91,12 +92,14 @@ AC_MSG_CHECKING([whether to include GLAMOR_GLES2 support])
 AC_ARG_ENABLE(glamor-gles2,         AS_HELP_STRING([--enable-glamor-gles2], [Build glamor based on gles2 (default: no)]), [GLAMOR_GLES2="$enableval"], [GLAMOR_GLES2=no])
 AC_MSG_RESULT([$GLAMOR_GLES2])
 
+AC_MSG_CHECKING([whether to include GLAMOR Xv support])
+AC_ARG_ENABLE(xv,         AS_HELP_STRING([--disable-xv], [Disable glamor Xv (default: enabled)]), [GLAMOR_XV="$enableval"], [GLAMOR_XV=yes])
+AC_MSG_RESULT([$GLAMOR_XV])
+AM_CONDITIONAL([GLAMOR_XV], [test "x$GLAMOR_XV" != xno])
+
 AC_MSG_CHECKING([whether to enable DEBUG])
 AC_ARG_ENABLE(debug,         AS_HELP_STRING([--enable-debug], [Build debug version glamor (default: no)]), [DEBUG="$enableval"], [DEBUG=no])
 AC_MSG_RESULT([$DEBUG])
-
-AM_CONDITIONAL([GLAMOR_GLES2], [test "x$GLAMOR_GLES2" = xyes])
-
 if test "x$DEBUG" = xyes; then
    AC_DEFINE(DEBUG, 1, [Enable DEBUG])
 fi
@@ -115,6 +118,11 @@ fi
 
 AC_SUBST([GLAMOR_GL_CFLAGS])
 
+AM_CONDITIONAL([GLAMOR_GLES2], [test "x$GLAMOR_GLES2" = xyes])
+if test "x$GLAMOR_XV" = xyes; then
+   AC_DEFINE(GLAMOR_XV,1,[Build Xv support])
+fi
+
 PKG_CHECK_MODULES([LIBDRM], $LIBDRM)
 PKG_CHECK_MODULES(EGL, $LIBEGL, [EGL=yes], [EGL=no])
 AM_CONDITIONAL([EGL], [test "x$EGL" = xyes])
@@ -125,6 +133,21 @@ if test "x$EGL = xyes"; then
      AC_DEFINE(GLAMOR_HAS_GBM, 1, [Use GBM.])
      AC_DEFINE(GLX_USE_SHARED_DISPATCH, 1, [GLX and GLAMOR share the glapi dispatch table.])
    fi
+fi
+
+PKG_CHECK_MODULES(GBMv9, $LIBGBMv9, [GBMv9=yes], [GBMv9=no])
+
+AC_MSG_CHECKING([Enable Glamor Dri3 helpers])
+AC_ARG_ENABLE(glamor-dri3, AS_HELP_STRING([--enable-glamor-dri3], [Build glamor Dri3 helpers (default: yes if libgbm >= 9 is detected)]), [GLAMOR_DRI3_HELPERS="$enableval"], [GLAMOR_DRI3_HELPERS=yes])
+
+if test "x$GLAMOR_DRI3_HELPERS" = xyes -a "x$GBMv9" = xno; then
+   GLAMOR_DRI3_HELPERS=no
+fi
+
+AC_MSG_RESULT([$GLAMOR_DRI3_HELPERS])
+
+if test "x$GLAMOR_DRI3_HELPERS" = xyes; then
+    AC_DEFINE(GLAMOR_HAS_DRI3_SUPPORT, 1, [Enable Dri3 helpers])
 fi
 
 dnl
@@ -180,8 +203,9 @@ fi
 AC_SUBST([GLX_DEFINES])
 AC_SUBST([GLX_SYS_LIBS])
 
-AC_OUTPUT([Makefile
+AC_CONFIG_FILES([Makefile
            glamor-egl.pc
            glamor.pc
            src/Makefile
 	   conf/Makefile])
+AC_OUTPUT

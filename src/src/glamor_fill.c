@@ -27,9 +27,13 @@
 
 #include "glamor_priv.h"
 
-/** @file glamor_fillspans.c
+/** @file glamor_fill.c
  *
  * GC fill implementation, based loosely on fb_fill.c
+ */
+
+/**
+ * Fills the given rectangle of a drawable with the GC's fill style.
  */
 Bool
 glamor_fill(DrawablePtr drawable,
@@ -110,13 +114,12 @@ glamor_fill(DrawablePtr drawable,
 		x = 0;
 		y = 0;
 	}
-	if (glamor_prepare_access(drawable, GLAMOR_ACCESS_RW)) {
-		if (glamor_prepare_access_gc(gc)) {
-			fbFill(drawable, gc, x, y, width, height);
-			glamor_finish_access_gc(gc);
-		}
-		glamor_finish_access(drawable, GLAMOR_ACCESS_RW);
+	if (glamor_prepare_access(drawable, GLAMOR_ACCESS_RW) &&
+	    glamor_prepare_access_gc(gc)) {
+	    fbFill(drawable, gc, x, y, width, height);
 	}
+	glamor_finish_access_gc(gc);
+	glamor_finish_access(drawable);
 
 	if (sub_pixmap != NULL) {
 		if (gc->fillStyle != FillSolid) {
@@ -190,9 +193,6 @@ _glamor_solid_boxes(PixmapPtr pixmap, BoxPtr box, int nbox, float *color)
 	    glamor_get_pixmap_private(pixmap);
 	glamor_gl_dispatch *dispatch;
 	GLfloat xscale, yscale;
-	float vertices[32];
-	float *pvertices = vertices;
-	int valid_nbox = ARRAY_SIZE(vertices);
 
 	glamor_set_destination_pixmap_priv_nc(pixmap_priv);
 
@@ -204,57 +204,60 @@ _glamor_solid_boxes(PixmapPtr pixmap, BoxPtr box, int nbox, float *color)
 
 	pixmap_priv_get_dest_scale(pixmap_priv, &xscale, &yscale);
 
-	if (unlikely(nbox*4*2 > ARRAY_SIZE(vertices))) {
-		int allocated_box;
+	dispatch->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, glamor_priv->ebo);
 
-		if (nbox * 6 > GLAMOR_COMPOSITE_VBO_VERT_CNT) {
-			allocated_box = GLAMOR_COMPOSITE_VBO_VERT_CNT / 6;
-		} else
-			allocated_box = nbox;
-		pvertices = malloc(allocated_box * 4 * 2 * sizeof(float));
-		if (pvertices)
-			valid_nbox = allocated_box;
-		else {
-			pvertices = vertices;
-			valid_nbox = ARRAY_SIZE(vertices) / (4*2);
-		}
-	}
-
-	if (unlikely(nbox > 1))
-		dispatch->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, glamor_priv->ebo);
-
-	dispatch->glVertexAttribPointer(GLAMOR_VERTEX_POS, 2, GL_FLOAT,
-					GL_FALSE, 2 * sizeof(float),
-					pvertices);
 	dispatch->glEnableVertexAttribArray(GLAMOR_VERTEX_POS);
 
 	while(nbox) {
-		int box_cnt, i;
-		float *valid_vertices;
-		valid_vertices = pvertices;
-		box_cnt = nbox > valid_nbox ? valid_nbox : nbox;
+		/* We can only use a limited number of verts up to the size of
+		 * the precomputed index buffer.
+		 */
+		int index_buffer_box_count = GLAMOR_COMPOSITE_VBO_VERT_CNT / 6;
+		int box_cnt = MIN(index_buffer_box_count, nbox);
+		int i;
+		float *next_box;
+		char *vbo_offset;
+
+		next_box = glamor_get_vbo_space(screen, box_cnt * 4 * 2 * sizeof(float),
+						&vbo_offset);
+
+		dispatch->glVertexAttribPointer(GLAMOR_VERTEX_POS, 2, GL_FLOAT,
+						GL_FALSE, 2 * sizeof(float),
+						vbo_offset);
+
 		for (i = 0; i < box_cnt; i++) {
 			glamor_set_normalize_vcoords(pixmap_priv, xscale, yscale,
 						     box[i].x1, box[i].y1,
 						     box[i].x2, box[i].y2,
 						     glamor_priv->yInverted,
-						     valid_vertices);
-			valid_vertices += 4*2;
+						     next_box);
+			next_box += 4 * 2;
 		}
-		if (box_cnt == 1)
+		glamor_put_vbo_space(screen);
+
+		if (glamor_priv->gl_flavor == GLAMOR_GL_DESKTOP)
+			dispatch->glDrawArrays(GL_QUADS, 0, box_cnt * 4);
+		else if (box_cnt == 1)
 			dispatch->glDrawArrays(GL_TRIANGLE_FAN, 0, box_cnt * 4);
 		else
+#ifndef GLAMOR_GLES2
+			dispatch->glDrawRangeElements(GL_TRIANGLES,
+						      0,
+						      box_cnt * 4,
+						      box_cnt * 6,
+						      GL_UNSIGNED_SHORT,
+						      NULL);
+#else
 			dispatch->glDrawElements(GL_TRIANGLES,
 						 box_cnt * 6,
 						 GL_UNSIGNED_SHORT,
 						 NULL);
+#endif
 		nbox -= box_cnt;
 		box += box_cnt;
 	}
 
-	if (pvertices != vertices)
-		free(pvertices);
-
+	dispatch->glBindBuffer(GL_ARRAY_BUFFER, 0);
 	dispatch->glDisableVertexAttribArray(GLAMOR_VERTEX_POS);
 	dispatch->glUseProgram(0);
 	glamor_put_dispatch(glamor_priv);
@@ -262,6 +265,12 @@ _glamor_solid_boxes(PixmapPtr pixmap, BoxPtr box, int nbox, float *color)
 	glamor_priv->render_idle_cnt = 0;
 }
 
+/**
+ * Fills the given rectangles of pixmap with an X pixel value.
+ *
+ * This is a helper used by other code after clipping and translation
+ * of coordinates to a glamor backing pixmap.
+ */
 Bool
 glamor_solid_boxes(PixmapPtr pixmap,
 		   BoxPtr box, int nbox,
@@ -308,6 +317,12 @@ glamor_solid_boxes(PixmapPtr pixmap,
 	return TRUE;
 }
 
+/**
+ * Fills a rectangle of a pixmap with an X pixel value.
+ *
+ * This is a helper used by other glamor code mostly for clearing of
+ * buffers to 0.
+ */
 Bool
 glamor_solid(PixmapPtr pixmap, int x, int y, int width, int height,
 	     unsigned char alu, unsigned long planemask,

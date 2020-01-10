@@ -168,7 +168,6 @@ glamor_put_image_xybitmap(DrawablePtr drawable, GCPtr gc,
 
 	dispatch->glGenTextures(1, &tex);
 	dispatch->glActiveTexture(GL_TEXTURE0);
-	dispatch->glEnable(GL_TEXTURE_2D);
 	dispatch->glBindTexture(GL_TEXTURE_2D, tex);
 	dispatch->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
 				  GL_NEAREST);
@@ -181,7 +180,6 @@ glamor_put_image_xybitmap(DrawablePtr drawable, GCPtr gc,
 			       w, h, 0, GL_COLOR_INDEX, GL_BITMAP, bits);
 	dispatch->glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 	dispatch->glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
-	dispatch->glEnable(GL_TEXTURE_2D);
 
 	/* Now that we've set up our bitmap texture and the shader, shove
 	 * the destination rectangle through the cliprects and run the
@@ -223,7 +221,6 @@ glamor_put_image_xybitmap(DrawablePtr drawable, GCPtr gc,
 	glamor_set_alu(GXcopy);
 	glamor_set_planemask(pixmap, ~0);
 	dispatch->glDeleteTextures(1, &tex);
-	dispatch->glDisable(GL_TEXTURE_2D);
 	dispatch->glDisableClientState(GL_VERTEX_ARRAY);
 	dispatch->glDisableClientState(GL_TEXTURE_COORD_ARRAY);
 	return;
@@ -232,11 +229,13 @@ glamor_put_image_xybitmap(DrawablePtr drawable, GCPtr gc,
 	glamor_fallback(": to %p (%c)\n",
 			drawable, glamor_get_drawable_location(drawable));
 fail:
-	if (glamor_prepare_access(drawable, GLAMOR_ACCESS_RW)) {
+	if (glamor_prepare_access(drawable, GLAMOR_ACCESS_RW) &&
+	    glamor_prepare_access_gc(gc)) {
 		fbPutImage(drawable, gc, 1, x, y, w, h, left_pad, XYBitmap,
 			   bits);
-		glamor_finish_access(drawable, GLAMOR_ACCESS_RW);
 	}
+	glamor_finish_access_gc(gc);
+	glamor_finish_access(drawable);
 }
 #endif
 
@@ -259,6 +258,7 @@ _glamor_put_image(DrawablePtr drawable, GCPtr gc, int depth, int x, int y,
 	PixmapPtr temp_pixmap, sub_pixmap;
 	glamor_pixmap_private *temp_pixmap_priv;
 	BoxRec box;
+	int stride;
 
 	glamor_get_drawable_deltas(drawable, pixmap, &x_off, &y_off);
 	clip = fbGetCompositeClip(gc);
@@ -282,12 +282,13 @@ _glamor_put_image(DrawablePtr drawable, GCPtr gc, int depth, int x, int y,
 	}
 	/* create a temporary pixmap and upload the bits to that
 	 * pixmap, then apply clip copy it to the destination pixmap.*/
+	stride = PixmapBytePad(w, depth);
 	box.x1 = x + drawable->x;
 	box.y1 = y + drawable->y;
 	box.x2 = x + w + drawable->x;
 	box.y2 = y + h + drawable->y;
 
-	if ((clip != NULL && !RegionContainsRect(clip, &box))
+	if ((clip != NULL && RegionContainsRect(clip, &box) != rgnIN)
 	     || gc->alu != GXcopy) {
 		temp_pixmap = glamor_create_pixmap(drawable->pScreen, w, h, depth, 0);
 		if (temp_pixmap == NULL)
@@ -301,13 +302,13 @@ _glamor_put_image(DrawablePtr drawable, GCPtr gc, int depth, int x, int y,
 		}
 
 		glamor_upload_sub_pixmap_to_texture(temp_pixmap, 0, 0, w, h,
-						    pixmap->devKind, bits, 0);
-
+		                                    stride, bits, 0);
 		glamor_copy_area(&temp_pixmap->drawable, drawable, gc, 0, 0, w, h, x, y);
 		glamor_destroy_pixmap(temp_pixmap);
-	} else
+	} else {
 		glamor_upload_sub_pixmap_to_texture(pixmap, x + drawable->x + x_off, y + drawable->y + y_off,
-						    w, h, PixmapBytePad(w, depth), bits, 0);
+		                                    w, h, stride, bits, 0);
+	}
 	ret = TRUE;
 	goto done;
 

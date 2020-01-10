@@ -1,13 +1,14 @@
-%global checkout 20130401git81aadb8
+%global checkout 20140506gitf78901e
 
 Summary: X.org glamor library
 Name: xorg-x11-glamor
-Version: 0.5.0
-Release: 6.%{checkout}%{?dist}
+Version: 0.6.0
+Release: 5.%{checkout}%{?dist}
 License: MIT
 Group: System Environment/Libraries
 URL: http://www.freedesktop.org/wiki/Software/Glamor
 
+ExcludeArch: s390 s390x ppc ppc64
 
 # source tarball has to be created from git using make-git-snapshot.sh
 # if checkout value is 20130401git81aadb8 then create the tar with :
@@ -16,9 +17,8 @@ URL: http://www.freedesktop.org/wiki/Software/Glamor
 Source0: %{name}-%{checkout}.tar.xz
 Source1: make-git-snapshot.sh
 
-ExcludeArch: s390 s390x ppc ppc64
-
-Requires: xorg-x11-server-Xorg
+Requires: xorg-x11-server-Xorg %(xserver-sdk-abi-requires ansic)
+Requires: xorg-x11-server-Xorg %(xserver-sdk-abi-requires videodrv)
 BuildRequires: pkgconfig autoconf automake libtool
 BuildRequires: xorg-x11-server-devel
 BuildRequires: mesa-libgbm-devel mesa-libEGL-devel
@@ -36,7 +36,6 @@ X.org glamor development package
 
 %prep
 %setup -q -n %{name}-%{checkout}
-
 %build
 autoreconf --install
 %configure --disable-static
@@ -56,7 +55,7 @@ find $RPM_BUILD_ROOT -type f -name '*.la' -delete
 %{_libdir}/libglamor.so.0
 %{_libdir}/libglamor.so.0.0.0
 %{_libdir}/xorg/modules/libglamoregl.so
-%{_datadir}/X11/xorg.conf.d/glamor.conf
+%exclude %{_datadir}/X11/xorg.conf.d/glamor.conf
 
 %files devel
 %dir %{_includedir}/xorg
@@ -67,8 +66,35 @@ find $RPM_BUILD_ROOT -type f -name '*.la' -delete
 
 
 %changelog
-* Mon Apr 22 2013 Jerome Glisse <jglisse@redhat.com> 0.5.0-6.20130401git81aadb8
-- Do not build on s390 or s390x or ppc useless on those
+* Thu May 22 2014 Jérôme Glisse <jglisse@redhat.com> 0.6.0-5.20140505gita4fbc77
+- Fix missing exclude
+
+* Thu May 22 2014 Jérôme Glisse <jglisse@redhat.com> 0.6.0-4.20140505gita4fbc77
+- Remove glamor.conf from instalation (to fix 1056011)
+
+* Mon May 12 2014 Jérôme Glisse <jglisse@redhat.com> 0.6.0-3.20140505gita4fbc77
+- Bump version to trick build root.
+
+* Tue May 06 2014 Jérôme Glisse <jglisse@redhat.com> 0.6.0-2.20140506gitf78901e
+- Drop top commit of glamor
+
+* Mon May 05 2014 Jérôme Glisse <jglisse@redhat.com> 0.6.0-1.20140505gita4fbc77
+- Rebase to upstream for various fixes and improvement
+
+* Tue Jan 28 2014 Adam Jackson <ajax@redhat.com> 0.5.1-4
+- Rebuild
+
+* Wed Jan 15 2014 Dave Airlie <airlied@redhat.com> 0.5.1-3.20140115gitfb4d046c
+- rebase to upstream for leak and render fixes + add lines speed up
+
+* Fri Oct 25 2013 Adam Jackson <ajax@redhat.com> 0.5.1-2
+- Add xserver ABI version interlocks
+
+* Wed Oct 09 2013 Adam Jackson <ajax@redhat.com> 0.5.1-1
+- New git snap for various bugfixes, Xv support, etc.
+
+* Sun Aug 04 2013 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 0.5.0-6.20130401git81aadb8
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_20_Mass_Rebuild
 
 * Thu Apr 11 2013 Dave Airlie <airlied@redhat.com> 0.5.0-5.20130401git81aadb8
 - enable TLS, mesa builds with TLS enabled are also processing.

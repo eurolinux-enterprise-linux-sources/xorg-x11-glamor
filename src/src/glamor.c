@@ -96,7 +96,7 @@ glamor_set_pixmap_texture(PixmapPtr pixmap, unsigned int tex)
 		glamor_destroy_fbo(fbo);
 	}
 
-	gl_iformat_for_depth(pixmap->drawable.depth, &format);
+	format = gl_iformat_for_pixmap(pixmap);
 	fbo = glamor_create_fbo_from_tex(glamor_priv, pixmap->drawable.width,
 					 pixmap->drawable.height,
 					 format, tex, 0);
@@ -134,7 +134,7 @@ glamor_create_pixmap(ScreenPtr screen, int w, int h, int depth,
 	glamor_pixmap_private *pixmap_priv;
 	glamor_screen_private *glamor_priv =
 	    glamor_get_screen_private(screen);
-	glamor_pixmap_fbo *fbo;
+	glamor_pixmap_fbo *fbo = NULL;
 	int pitch;
 	GLenum format;
 
@@ -165,7 +165,7 @@ glamor_create_pixmap(ScreenPtr screen, int w, int h, int depth,
 	pixmap_priv->base.pixmap = pixmap;
 	pixmap_priv->base.glamor_priv = glamor_priv;
 
-	gl_iformat_for_depth(depth, &format);
+	format = gl_iformat_for_pixmap(pixmap);
 
 	pitch = (((w * pixmap->drawable.bitsPerPixel + 7) / 8) + 3) & ~3;
 	screen->ModifyPixmapHeader(pixmap, w, h, 0, 0, pitch, NULL);
@@ -173,13 +173,13 @@ glamor_create_pixmap(ScreenPtr screen, int w, int h, int depth,
 	if (type == GLAMOR_MEMORY_MAP || glamor_check_fbo_size(glamor_priv, w, h)) {
 		pixmap_priv->type = type;
 		fbo = glamor_create_fbo(glamor_priv, w, h, format, usage);
-	}
-	else {
-		DEBUGF("Create LARGE pixmap %p width %d height %d\n", pixmap, w, h);
+	} else {
+	    int tile_size = glamor_priv->max_fbo_size;
+		DEBUGF("Create LARGE pixmap %p width %d height %d, tile size %d\n", pixmap, w, h, tile_size);
 		pixmap_priv->type = GLAMOR_TEXTURE_LARGE;
 		fbo = glamor_create_fbo_array(glamor_priv, w, h, format, usage,
-					      glamor_priv->max_fbo_size,
-					      glamor_priv->max_fbo_size,
+					      tile_size,
+					      tile_size,
 					      pixmap_priv);
 	}
 
@@ -209,7 +209,12 @@ glamor_destroy_textured_pixmap(PixmapPtr pixmap)
 Bool
 glamor_destroy_pixmap(PixmapPtr pixmap)
 {
-	glamor_destroy_textured_pixmap(pixmap);
+	glamor_screen_private
+	  *glamor_priv = glamor_get_screen_private(pixmap->drawable.pScreen);
+	if (glamor_priv->dri3_enabled)
+		glamor_egl_destroy_textured_pixmap(pixmap);
+	else
+		glamor_destroy_textured_pixmap(pixmap);
 	return fbDestroyPixmap(pixmap);
 }
 
@@ -219,6 +224,8 @@ glamor_block_handler(ScreenPtr screen)
 	glamor_screen_private *glamor_priv =
 	    glamor_get_screen_private(screen);
 	glamor_gl_dispatch *dispatch;
+
+	assert(!glamor_priv->ctx.get_count);
 
 	dispatch = glamor_get_dispatch(glamor_priv);
 	glamor_priv->tick++;
@@ -237,7 +244,11 @@ _glamor_block_handler(void *data, OSTimePtr timeout,
 		      void *last_select_mask)
 {
 	glamor_screen_private *glamor_priv = data;
-	glamor_gl_dispatch *dispatch = glamor_get_dispatch(glamor_priv);
+	glamor_gl_dispatch *dispatch;
+
+	assert(!glamor_priv->ctx.get_count);
+
+	dispatch = glamor_get_dispatch(glamor_priv);
 	dispatch->glFlush();
 	glamor_put_dispatch(glamor_priv);
 }
@@ -279,9 +290,9 @@ glamor_init(ScreenPtr screen, unsigned int flags)
 		return FALSE;
 
 	if (flags & GLAMOR_INVERTED_Y_AXIS) {
-		glamor_priv->yInverted = 1;
+		glamor_priv->yInverted = TRUE;
 	} else
-		glamor_priv->yInverted = 0;
+		glamor_priv->yInverted = FALSE;
 
 	if (!dixRegisterPrivateKey
 	    (glamor_screen_private_key, PRIVATE_SCREEN, 0)) {
@@ -413,6 +424,9 @@ glamor_init(ScreenPtr screen, unsigned int flags)
 	glamor_priv->saved_procs.create_picture = ps->CreatePicture;
 	ps->CreatePicture = glamor_create_picture;
 
+	glamor_priv->saved_procs.set_window_pixmap = screen->SetWindowPixmap;
+	screen->SetWindowPixmap = glamor_set_window_pixmap;
+
 	glamor_priv->saved_procs.destroy_picture = ps->DestroyPicture;
 	ps->DestroyPicture = glamor_destroy_picture;
 	glamor_init_composite_shaders(screen);
@@ -427,6 +441,9 @@ glamor_init(ScreenPtr screen, unsigned int flags)
 	glamor_init_finish_access_shaders(screen);
 #ifdef GLAMOR_GRADIENT_SHADER
 	glamor_init_gradient_shader(screen);
+#endif
+#ifdef GLAMOR_XV
+	glamor_init_xv_shader(screen);
 #endif
 	glamor_pixmap_init(screen);
 
@@ -447,6 +464,9 @@ glamor_release_screen_priv(ScreenPtr screen)
 	glamor_screen_private *glamor_priv;
 
 	glamor_priv = glamor_get_screen_private(screen);
+#ifdef GLAMOR_XV
+	glamor_fini_xv_shader(screen);
+#endif
 #ifdef RENDER
 	glamor_fini_composite_shaders(screen);
 #endif
@@ -525,6 +545,7 @@ glamor_close_screen(CLOSE_SCREEN_ARGS_DECL)
 	ps->CompositeRects = glamor_priv->saved_procs.composite_rects;
 	ps->Glyphs = glamor_priv->saved_procs.glyphs;
 	ps->UnrealizeGlyph = glamor_priv->saved_procs.unrealize_glyph;
+	screen->SetWindowPixmap = glamor_priv->saved_procs.set_window_pixmap;
 #endif
 	screen_pixmap = screen->GetScreenPixmap(screen);
 	glamor_set_pixmap_private(screen_pixmap, NULL);
@@ -541,4 +562,75 @@ void
 glamor_fini(ScreenPtr screen)
 {
 	/* Do nothing currently. */
+}
+
+void glamor_enable_dri3(ScreenPtr screen)
+{
+	glamor_screen_private *glamor_priv =
+	    glamor_get_screen_private(screen);
+	glamor_priv->dri3_enabled = TRUE;
+}
+
+Bool glamor_is_dri3_support_enabled(ScreenPtr screen)
+{
+	glamor_screen_private *glamor_priv =
+	    glamor_get_screen_private(screen);
+	return glamor_priv->dri3_enabled;
+}
+
+int
+glamor_dri3_fd_from_pixmap (ScreenPtr screen,
+                            PixmapPtr pixmap,
+                            CARD16 *stride,
+                            CARD32 *size)
+{
+	glamor_pixmap_private *pixmap_priv;
+	glamor_screen_private *glamor_priv =
+	    glamor_get_screen_private(pixmap->drawable.pScreen);
+
+	pixmap_priv = glamor_get_pixmap_private(pixmap);
+	if (pixmap_priv == NULL || !glamor_priv->dri3_enabled)
+		return -1;
+	switch (pixmap_priv->type)
+	{
+		case GLAMOR_TEXTURE_DRM:
+		case GLAMOR_TEXTURE_ONLY:
+			if (!glamor_pixmap_ensure_fbo(pixmap, GL_RGBA, 0))
+				return -1;
+			return glamor_egl_dri3_fd_name_from_tex(screen,
+								pixmap,
+								pixmap_priv->base.fbo->tex,
+								FALSE,
+								stride,
+								size);
+		default: break;
+	}
+	return -1;
+}
+
+int
+glamor_dri3_name_from_pixmap (PixmapPtr pixmap)
+{
+	glamor_pixmap_private *pixmap_priv;
+	glamor_screen_private *glamor_priv =
+	    glamor_get_screen_private(pixmap->drawable.pScreen);
+
+	pixmap_priv = glamor_get_pixmap_private(pixmap);
+	if (pixmap_priv == NULL || !glamor_priv->dri3_enabled)
+		return -1;
+	switch (pixmap_priv->type)
+	{
+		case GLAMOR_TEXTURE_DRM:
+		case GLAMOR_TEXTURE_ONLY:
+			if (!glamor_pixmap_ensure_fbo(pixmap, GL_RGBA, 0))
+				return -1;
+			return glamor_egl_dri3_fd_name_from_tex(pixmap->drawable.pScreen,
+								pixmap,
+								pixmap_priv->base.fbo->tex,
+								TRUE,
+								NULL,
+								NULL);
+		default: break;
+	}
+	return -1;
 }
