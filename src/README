@@ -22,16 +22,16 @@ It consists of two packages:
 		     functions to create and initialize OpenGL/EGL context.  
 
 
-It’s somehow hardware independent. And could be a building
+It’s somehow hardware independently. And could be a building 
 block of any X server’s DDX driver:
 
         Xorg’s DDX driver could leverage glamor-egl package to 
 	create an egl context without any native X system. This 
 	package can support every platform which has OpenGL and 
 	gbm and drm libraries.
-	Now the xf86-video-intel driver uses glamor as one of its
+	Now the xf86-intel-video driver uses glamor as one of its
 	option. When you build it with --enable-glamor, then it
-	will use glamor as its rendering engine.
+	will use glamor as its rendering enginee.
 
 Why glamor
 ----------------------------------------------
@@ -65,7 +65,7 @@ according to the rendering request. Normally, it will prepare
 a serial of hardware dependent command, and then upload the 
 command to the GFX device through DRM interface.
 
-Glamor just provides the third access method:
+Glamor just providess the third access method:
 Each pixmap has a normal texture object. Bind the texture 
 object to a frame buffer object.  Writing shaders according 
 to the rendering type and then call GL functions to render 
@@ -78,22 +78,20 @@ the normal 2D driver.
 
 Where to get more information about the driver
 ----------------------------------------------
-Please submit bugs & patches to the Xorg bugzilla:
+	http://www.freedesktop.org/wiki/Software/Glamor
 
-        https://bugs.freedesktop.org/enter_bug.cgi?product=xorg
+Mailing list for communication with users and developers of
+glamor:
 
-All questions regarding this software should be directed at the
-glamor mailing list:
+	Note: Subscription is required before posting, but anyone is
+	free to subscribe. See instructions (and archives) here:
 
-        http://lists.freedesktop.org/mailman/listinfo/glamor
+	http://lists.freedesktop.org/mailman/listinfo/glamor
 
-The master development code repository can be found at:
+To report bugs encountered with the driver, see:
 
-        git://anongit.freedesktop.org/git/xorg/driver/glamor
+	TBD.
 
-        http://cgit.freedesktop.org/xorg/driver/glamor
+To see bugs that are targeted to be fixed in the next release:
 
-For more information on the git code manager, see:
-
-        http://wiki.x.org/wiki/GitPage
-
+	TBD.

@@ -1,14 +1,13 @@
-%global checkout 20140115gitfb4d046c
+%global checkout 20131023git16c86bd
 
 Summary: X.org glamor library
 Name: xorg-x11-glamor
 Version: 0.5.1
-Release: 4.%{checkout}%{?dist}
+Release: 3.%{checkout}%{?dist}
 License: MIT
 Group: System Environment/Libraries
 URL: http://www.freedesktop.org/wiki/Software/Glamor
 
-ExcludeArch: s390 s390x ppc ppc64
 
 # source tarball has to be created from git using make-git-snapshot.sh
 # if checkout value is 20130401git81aadb8 then create the tar with :
@@ -17,7 +16,8 @@ ExcludeArch: s390 s390x ppc ppc64
 Source0: %{name}-%{checkout}.tar.xz
 Source1: make-git-snapshot.sh
 
-Patch0: glamor-0.5-speed-up-lines.patch
+ExcludeArch: s390 s390x ppc ppc64
+
 Requires: xorg-x11-server-Xorg %(xserver-sdk-abi-requires ansic)
 Requires: xorg-x11-server-Xorg %(xserver-sdk-abi-requires videodrv)
 BuildRequires: pkgconfig autoconf automake libtool
@@ -37,7 +37,7 @@ X.org glamor development package
 
 %prep
 %setup -q -n %{name}-%{checkout}
-%patch0 -p1 -b .fixlines
+
 %build
 autoreconf --install
 %configure --disable-static
@@ -68,20 +68,14 @@ find $RPM_BUILD_ROOT -type f -name '*.la' -delete
 
 
 %changelog
-* Tue Jan 28 2014 Adam Jackson <ajax@redhat.com> 0.5.1-4
-- Rebuild
+* Thu Nov 07 2013 Adam Jackson <ajax@redhat.com> 0.5.1-3.20131023git16c86bd
+- 1.15RC1 ABI rebuild
 
-* Wed Jan 15 2014 Dave Airlie <airlied@redhat.com> 0.5.1-3.20140115gitfb4d046c
-- rebase to upstream for leak and render fixes + add lines speed up
+* Wed Oct 23 2013 Jerome Glisse <jglisse@redhat.com> 0.5.1-1.20131023git16c86bd
+- Snapshot 0.5.1 (bringing fixes needed for new GPU support #1018417)
 
-* Fri Oct 25 2013 Adam Jackson <ajax@redhat.com> 0.5.1-2
-- Add xserver ABI version interlocks
-
-* Wed Oct 09 2013 Adam Jackson <ajax@redhat.com> 0.5.1-1
-- New git snap for various bugfixes, Xv support, etc.
-
-* Sun Aug 04 2013 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 0.5.0-6.20130401git81aadb8
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_20_Mass_Rebuild
+* Mon Apr 22 2013 Jerome Glisse <jglisse@redhat.com> 0.5.0-6.20130401git81aadb8
+- Do not build on s390 or s390x or ppc useless on those
 
 * Thu Apr 11 2013 Dave Airlie <airlied@redhat.com> 0.5.0-5.20130401git81aadb8
 - enable TLS, mesa builds with TLS enabled are also processing.

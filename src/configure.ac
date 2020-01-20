@@ -23,9 +23,9 @@
 
 # Initialize Autoconf
 AC_PREREQ([2.63])
-AC_INIT([glamor-egl],
+AC_INIT([glamor-egl], 
         [0.5.1],
-        [https://bugs.freedesktop.org/enter_bug.cgi?product=xorg],
+        [https://bugs.freedesktop.org/enter_bug.cgi?product=glamor], 
         [glamor-egl])
 
 AC_CONFIG_SRCDIR([Makefile.am])
@@ -62,11 +62,10 @@ LIBPIXMAN="pixman-1 >= 0.21.8"
 LIBEGL="egl"
 LIBGLESV2="glesv2"
 LIBGBM="gbm"
-LIBGBMv9="gbm >= 9"
 
 # Define a configure option for an alternate input module directory
 AC_ARG_WITH(xorg-module-dir,
-            AS_HELP_STRING([--with-xorg-module-dir=DIR],
+            AC_HELP_STRING([--with-xorg-module-dir=DIR],
                            [Default xorg module directory [[default=$libdir/xorg/modules]]]),
             [moduledir="$withval"],
             [moduledir="$libdir/xorg/modules"])
@@ -76,7 +75,7 @@ AC_SUBST([moduledir])
 # Define a configure option for an alternate X Server configuration directory
 sysconfigdir=`$PKG_CONFIG --variable=sysconfigdir xorg-server`
 AC_ARG_WITH(xorg-conf-dir,
-            AS_HELP_STRING([--with-xorg-conf-dir=DIR],
+            AC_HELP_STRING([--with-xorg-conf-dir=DIR],
                            [Default xorg.conf.d directory [[default=from $PKG_CONFIG xorg-server]]]),
             [configdir="$withval"],
             [configdir="$sysconfigdir"])
@@ -135,21 +134,6 @@ if test "x$EGL = xyes"; then
    fi
 fi
 
-PKG_CHECK_MODULES(GBMv9, $LIBGBMv9, [GBMv9=yes], [GBMv9=no])
-
-AC_MSG_CHECKING([Enable Glamor Dri3 helpers])
-AC_ARG_ENABLE(glamor-dri3, AS_HELP_STRING([--enable-glamor-dri3], [Build glamor Dri3 helpers (default: yes if libgbm >= 9 is detected)]), [GLAMOR_DRI3_HELPERS="$enableval"], [GLAMOR_DRI3_HELPERS=yes])
-
-if test "x$GLAMOR_DRI3_HELPERS" = xyes -a "x$GBMv9" = xno; then
-   GLAMOR_DRI3_HELPERS=no
-fi
-
-AC_MSG_RESULT([$GLAMOR_DRI3_HELPERS])
-
-if test "x$GLAMOR_DRI3_HELPERS" = xyes; then
-    AC_DEFINE(GLAMOR_HAS_DRI3_SUPPORT, 1, [Enable Dri3 helpers])
-fi
-
 dnl
 dnl TLS detection
 dnl
@@ -203,9 +187,8 @@ fi
 AC_SUBST([GLX_DEFINES])
 AC_SUBST([GLX_SYS_LIBS])
 
-AC_CONFIG_FILES([Makefile
+AC_OUTPUT([Makefile
            glamor-egl.pc
            glamor.pc
            src/Makefile
 	   conf/Makefile])
-AC_OUTPUT

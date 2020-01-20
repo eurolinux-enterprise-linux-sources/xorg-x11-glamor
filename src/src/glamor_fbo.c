@@ -212,7 +212,7 @@ glamor_pixmap_ensure_fb(glamor_pixmap_fbo *fbo)
 			break;
 		}
 
-		FatalError("destination is framebuffer incomplete: %s [%x]\n",
+		FatalError("destination is framebuffer incomplete: %s [%#x]\n",
 			   str, status);
 	}
 	glamor_put_dispatch(fbo->glamor_priv);
@@ -328,30 +328,18 @@ _glamor_create_tex(glamor_screen_private *glamor_priv,
 		   int w, int h, GLenum format)
 {
 	glamor_gl_dispatch *dispatch;
-	unsigned int tex = 0;
+	unsigned int tex;
 
-	/* With dri3, we want to allocate ARGB8888 pixmaps only.
-	 * Depending on the implementation, GL_RGBA might not
-	 * give us ARGB8888. We ask glamor_egl to use get
-	 * an ARGB8888 based texture for us. */
-	if (glamor_priv->dri3_enabled && format == GL_RGBA)
-	{
-		tex = glamor_egl_create_argb8888_based_texture(glamor_priv->screen,
-								w, h);
-	}
-	if (!tex)
-	{
-		dispatch = glamor_get_dispatch(glamor_priv);
-		dispatch->glGenTextures(1, &tex);
-		dispatch->glBindTexture(GL_TEXTURE_2D, tex);
-		dispatch->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
-					  GL_NEAREST);
-		dispatch->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
-					  GL_NEAREST);
-		dispatch->glTexImage2D(GL_TEXTURE_2D, 0, format, w, h, 0,
-				       format, GL_UNSIGNED_BYTE, NULL);
-		glamor_put_dispatch(glamor_priv);
-	}
+	dispatch = glamor_get_dispatch(glamor_priv);
+	dispatch->glGenTextures(1, &tex);
+	dispatch->glBindTexture(GL_TEXTURE_2D, tex);
+	dispatch->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+				  GL_NEAREST);
+	dispatch->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+				  GL_NEAREST);
+	dispatch->glTexImage2D(GL_TEXTURE_2D, 0, format, w, h, 0, format,
+			       GL_UNSIGNED_BYTE, NULL);
+	glamor_put_dispatch(glamor_priv);
 	return tex;
 }
 
