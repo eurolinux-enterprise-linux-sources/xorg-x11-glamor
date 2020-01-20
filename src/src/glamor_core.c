@@ -68,11 +68,14 @@ glamor_compile_glsl_prog(glamor_gl_dispatch * dispatch, GLenum type,
 
 		dispatch->glGetShaderiv(prog, GL_INFO_LOG_LENGTH, &size);
 		info = malloc(size);
-
-		dispatch->glGetShaderInfoLog(prog, size, NULL, info);
-		ErrorF("Failed to compile %s: %s\n",
-		       type == GL_FRAGMENT_SHADER ? "FS" : "VS", info);
-		ErrorF("Program source:\n%s", source);
+		if (info) {
+			dispatch->glGetShaderInfoLog(prog, size, NULL, info);
+			ErrorF("Failed to compile %s: %s\n",
+			       type == GL_FRAGMENT_SHADER ? "FS" : "VS", info);
+			ErrorF("Program source:\n%s", source);
+			free(info);
+		} else
+			ErrorF("Failed to get shader compilation info.\n");
 		FatalError("GLSL compile failure\n");
 	}
 
@@ -104,6 +107,20 @@ Bool
 glamor_prepare_access(DrawablePtr drawable, glamor_access_t access)
 {
 	PixmapPtr pixmap = glamor_get_drawable_pixmap(drawable);
+	glamor_pixmap_private *pixmap_priv = glamor_get_pixmap_private(pixmap);
+
+	if (pixmap->devPrivate.ptr) {
+	    /* Already mapped, nothing needs to be done. Note that we
+	     * aren't allowing promotion from RO to RW, because it would
+	     * require re-mapping the PBO.
+	     */
+		assert(!GLAMOR_PIXMAP_PRIV_HAS_FBO(pixmap_priv) ||
+		       access == GLAMOR_ACCESS_RO ||
+		       pixmap_priv->base.mapped_for_write);
+		return TRUE;
+	}
+	pixmap_priv->base.mapped_for_write = (access == GLAMOR_ACCESS_RW);
+
 	return glamor_download_pixmap_to_cpu(pixmap, access);
 }
 
@@ -276,7 +293,6 @@ glamor_init_finish_access_shaders(ScreenPtr screen)
 	dispatch->glUniform1i(sampler_uniform_location, 0);
 	dispatch->glUniform1i(glamor_priv->finish_access_revert[0], 0);
 	dispatch->glUniform1i(glamor_priv->finish_access_swap_rb[0], 0);
-	dispatch->glUseProgram(0);
 
 	glamor_priv->finish_access_revert[1] =
 	    dispatch->
@@ -294,7 +310,6 @@ glamor_init_finish_access_shaders(ScreenPtr screen)
 	dispatch->glUniform1i(glamor_priv->finish_access_revert[1], 0);
 	dispatch->glUniform1i(sampler_uniform_location, 0);
 	dispatch->glUniform1i(glamor_priv->finish_access_swap_rb[1], 0);
-	dispatch->glUseProgram(0);
 	glamor_put_dispatch(glamor_priv);
 }
 
@@ -312,7 +327,7 @@ glamor_fini_finish_access_shaders(ScreenPtr screen)
 }
 
 void
-glamor_finish_access(DrawablePtr drawable, glamor_access_t access_mode)
+glamor_finish_access(DrawablePtr drawable)
 {
 	PixmapPtr pixmap = glamor_get_drawable_pixmap(drawable);
 	glamor_pixmap_private *pixmap_priv =
@@ -323,7 +338,11 @@ glamor_finish_access(DrawablePtr drawable, glamor_access_t access_mode)
 	if (!GLAMOR_PIXMAP_PRIV_HAS_FBO_DOWNLOADED(pixmap_priv))
 		return;
 
-	if (access_mode != GLAMOR_ACCESS_RO) {
+	/* If we are doing a series of unmaps from a nested map, we're done. */
+	if (!pixmap->devPrivate.ptr)
+	    return;
+
+	if (pixmap_priv->base.mapped_for_write) {
 		glamor_restore_pixmap_to_texture(pixmap);
 	}
 
@@ -374,9 +393,7 @@ glamor_prepare_access_gc(GCPtr gc)
 		if (!glamor_prepare_access(&gc->tile.pixmap->drawable,
 					   GLAMOR_ACCESS_RO)) {
 			if (gc->stipple)
-				glamor_finish_access(&gc->
-						     stipple->drawable, 
-						     GLAMOR_ACCESS_RO);
+				glamor_finish_access(&gc->stipple->drawable);
 			return FALSE;
 		}
 	}
@@ -390,9 +407,9 @@ void
 glamor_finish_access_gc(GCPtr gc)
 {
 	if (gc->fillStyle == FillTiled)
-		glamor_finish_access(&gc->tile.pixmap->drawable, GLAMOR_ACCESS_RO);
+		glamor_finish_access(&gc->tile.pixmap->drawable);
 	if (gc->stipple)
-		glamor_finish_access(&gc->stipple->drawable, GLAMOR_ACCESS_RO);
+		glamor_finish_access(&gc->stipple->drawable);
 }
 
 Bool
@@ -474,8 +491,7 @@ glamor_validate_gc(GCPtr gc, unsigned long changes, DrawablePtr drawable)
 					    fb24_32ReformatTile
 					    (old_tile,
 					     drawable->bitsPerPixel);
-					glamor_finish_access
-					    (&old_tile->drawable, GLAMOR_ACCESS_RO);
+					glamor_finish_access(&old_tile->drawable);
 				}
 			}
 			if (new_tile) {
@@ -500,8 +516,7 @@ glamor_validate_gc(GCPtr gc, unsigned long changes, DrawablePtr drawable)
 				    (&gc->tile.pixmap->drawable,
 				     GLAMOR_ACCESS_RW)) {
 					fbPadPixmap(gc->tile.pixmap);
-					glamor_finish_access
-					    (&gc->tile.pixmap->drawable, GLAMOR_ACCESS_RW);
+					glamor_finish_access(&gc->tile.pixmap->drawable);
 				}
 			}
 		}
@@ -518,7 +533,7 @@ glamor_validate_gc(GCPtr gc, unsigned long changes, DrawablePtr drawable)
 		if (glamor_prepare_access
 		    (&gc->stipple->drawable, GLAMOR_ACCESS_RW)) {
 			fbValidateGC(gc, changes, drawable);
-			glamor_finish_access(&gc->stipple->drawable, GLAMOR_ACCESS_RW);
+			glamor_finish_access(&gc->stipple->drawable);
 		}
 	} else {
 		fbValidateGC(gc, changes, drawable);
@@ -560,7 +575,7 @@ glamor_bitmap_to_region(PixmapPtr pixmap)
 	if (!glamor_prepare_access(&pixmap->drawable, GLAMOR_ACCESS_RO))
 		return NULL;
 	ret = fbPixmapToRegion(pixmap);
-	glamor_finish_access(&pixmap->drawable, GLAMOR_ACCESS_RO);
+	glamor_finish_access(&pixmap->drawable);
 	return ret;
 }
 

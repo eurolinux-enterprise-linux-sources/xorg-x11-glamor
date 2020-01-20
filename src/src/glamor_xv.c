@@ -37,6 +37,7 @@
 #ifdef GLAMOR_XV
 #include "xf86xv.h"
 #include <X11/extensions/Xv.h>
+#include <xorg/damage.h>
 #include "fourcc.h"
 /* Reference color space transform data */
 typedef struct tagREF_TRANSFORM
@@ -90,7 +91,6 @@ glamor_init_xv_shader(ScreenPtr screen)
 	glamor_screen_private *glamor_priv;
 	glamor_gl_dispatch *dispatch;
 	GLint fs_prog, vs_prog;
-	GLint sampler_loc;
 
 	glamor_priv = glamor_get_screen_private(screen);
 	dispatch =  glamor_get_dispatch(glamor_priv);
@@ -441,7 +441,6 @@ dispatch->glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 dispatch->glDisableVertexAttribArray(GLAMOR_VERTEX_POS);
 dispatch->glDisableVertexAttribArray(GLAMOR_VERTEX_SOURCE);
 
-dispatch->glUseProgram(0);
 glamor_put_dispatch(glamor_priv);
 DamageDamageRegion(port_priv->pDraw, &port_priv->clip);
 }
@@ -491,7 +490,7 @@ static int glamor_xv_put_image(ScrnInfoPtr pScrn,
 
 	if (!port_priv->src_pix[0] || (width != port_priv->src_pix_w || height != port_priv->src_pix_h)) {
 		int i;
-		for (i = 0; i < 2; i++)
+		for (i = 0; i < 3; i++)
 			if (port_priv->src_pix[i])
 				glamor_destroy_pixmap(port_priv->src_pix[i]);
 
@@ -560,6 +559,7 @@ static int glamor_xv_put_image(ScrnInfoPtr pScrn,
 	port_priv->h = height;
 	port_priv->pDraw = pDrawable;
 	glamor_display_textured_video(port_priv);
+	glamor_xv_stop_video(pScrn, port_priv, TRUE);
 	return Success;
 }
 

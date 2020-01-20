@@ -46,13 +46,16 @@
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 
-#define GLAMOR_DEFAULT_PRECISION   "precision mediump float;\n"
 #include "glamor_glext.h"
 #else
 #include <GL/gl.h>
 #include <GL/glext.h>
-#define GLAMOR_DEFAULT_PRECISION
 #endif
+
+#define GLAMOR_DEFAULT_PRECISION     \
+	"#ifdef GL_ES\n"	     \
+	"precision mediump float;\n" \
+	"#endif\n"
 
 #ifdef RENDER
 #include "glyphstr.h"
@@ -167,13 +170,6 @@ enum gradient_shader {
 	SHADER_GRADIENT_COUNT,
 };
 
-enum gradient_shader_prog {
-	SHADER_GRADIENT_VS_PROG,
-	SHADER_GRADIENT_FS_MAIN_PROG,
-	SHADER_GRADIENT_FS_GETCOLOR_PROG,
-	SHADER_GRADIENT_PROG_COUNT,
-};
-
 struct glamor_screen_private;
 struct glamor_pixmap_private;
 
@@ -221,13 +217,10 @@ struct glamor_saved_procs {
 	CreatePictureProcPtr create_picture;
 	DestroyPictureProcPtr destroy_picture;
 	UnrealizeGlyphProcPtr unrealize_glyph;
+	SetWindowPixmapProcPtr set_window_pixmap;
 };
 
-#ifdef GLAMOR_GLES2
 #define CACHE_FORMAT_COUNT 3
-#else
-#define CACHE_FORMAT_COUNT 2
-#endif
 
 #define CACHE_BUCKET_WCOUNT 4
 #define CACHE_BUCKET_HCOUNT 4
@@ -242,11 +235,12 @@ struct glamor_saved_procs {
 
 typedef struct glamor_screen_private {
 	struct glamor_gl_dispatch _dispatch;
-	int yInverted;
+	Bool yInverted;
 	unsigned int tick;
 	enum glamor_gl_flavor gl_flavor;
 	int has_pack_invert;
 	int has_fbo_blit;
+	int has_buffer_storage;
 	int max_fbo_size;
 
 	struct xorg_list fbo_cache[CACHE_FORMAT_COUNT][CACHE_BUCKET_WCOUNT][CACHE_BUCKET_HCOUNT];
@@ -258,9 +252,12 @@ typedef struct glamor_screen_private {
 
 	/* vertext/elment_index buffer object for render */
 	GLuint vbo, ebo;
+	Bool vbo_mapped;
 	int vbo_offset;
+	int composite_vbo_offset;
 	int vbo_size;
 	char *vb;
+	char *vb_base;
 	int vb_stride;
 	Bool has_source_coords, has_mask_coords;
 	int render_nr_verts;
@@ -282,9 +279,7 @@ typedef struct glamor_screen_private {
 	/* glamor gradient, 0 for small nstops, 1 for
 	   large nstops and 2 for dynamic generate. */
 	GLint gradient_prog[SHADER_GRADIENT_COUNT][3];
-	GLint linear_gradient_shaders[SHADER_GRADIENT_PROG_COUNT][3];
 	int linear_max_nstops;
-	GLint radial_gradient_shaders[SHADER_GRADIENT_PROG_COUNT][3];
 	int radial_max_nstops;
 
 	/* glamor trapezoid shader. */
@@ -304,6 +299,7 @@ typedef struct glamor_screen_private {
 	int state;
 	unsigned int render_idle_cnt;
 	ScreenPtr screen;
+	int dri3_enabled;
 
 	/* xv */
 	GLint xv_prog;
@@ -312,11 +308,23 @@ typedef struct glamor_screen_private {
 typedef enum glamor_access {
 	GLAMOR_ACCESS_RO,
 	GLAMOR_ACCESS_RW,
-	GLAMOR_ACCESS_WO,
 } glamor_access_t;
 
-#define GLAMOR_FBO_NORMAL     1
-#define GLAMOR_FBO_DOWNLOADED 2
+enum glamor_fbo_state {
+	/** There is no storage attached to the pixmap. */
+	GLAMOR_FBO_UNATTACHED,
+	/**
+	 * The pixmap has FBO storage attached, but devPrivate.ptr doesn't
+	 * point at anything.
+	 */
+	GLAMOR_FBO_NORMAL,
+	/**
+	 * The FBO is present and can be accessed as a linear memory
+	 * mapping through devPrivate.ptr.
+	 */
+	GLAMOR_FBO_DOWNLOADED,
+};
+
 /* glamor_pixmap_fbo:
  * @list:    to be used to link to the cache pool list.
  * @expire:  when push to cache pool list, set a expire count.
@@ -348,12 +356,6 @@ typedef struct glamor_pixmap_fbo {
 
 /*
  * glamor_pixmap_private - glamor pixmap's private structure.
- * @gl_fbo:
- * 	0 		  	- The pixmap doesn't has a fbo attached to it.
- * 	GLAMOR_FBO_NORMAL 	- The pixmap has a fbo and can be accessed normally.
- * 	GLAMOR_FBO_DOWNLOADED 	- The pixmap has a fbo and already downloaded to
- * 				  CPU, so it can only be treated as a in-memory pixmap
- * 				  if this bit is set.
  * @gl_tex:  The pixmap is in a gl texture originally.
  * @is_picture: The drawable is attached to a picture.
  * @pict_format: the corresponding picture's format.
@@ -427,7 +429,13 @@ typedef struct glamor_pixmap_clipped_regions{
 
 typedef struct glamor_pixmap_private_base {
 	glamor_pixmap_type_t type;
-	unsigned char gl_fbo:2;
+	enum glamor_fbo_state gl_fbo;
+	/**
+	 * If devPrivate.ptr is non-NULL (meaning we're within
+	 * glamor_prepare_access), determies whether we should re-upload
+	 * that data on glamor_finish_access().
+	 */
+	Bool mapped_for_write;
 	unsigned char is_picture:1;
 	unsigned char gl_tex:1;
 	glamor_pixmap_fbo *fbo;
@@ -589,7 +597,7 @@ void glamor_copy_window(WindowPtr win, DDXPointRec old_origin,
 
 /* glamor_core.c */
 Bool glamor_prepare_access(DrawablePtr drawable, glamor_access_t access);
-void glamor_finish_access(DrawablePtr drawable, glamor_access_t access);
+void glamor_finish_access(DrawablePtr drawable);
 Bool glamor_prepare_access_window(WindowPtr window);
 void glamor_finish_access_window(WindowPtr window);
 Bool glamor_prepare_access_gc(GCPtr gc);
@@ -811,6 +819,15 @@ glamor_triangles(CARD8 op,
 
 void glamor_pixmap_init(ScreenPtr screen);
 void glamor_pixmap_fini(ScreenPtr screen);
+
+/* glamor_vbo.c */
+
+void *
+glamor_get_vbo_space(ScreenPtr screen, int size, char **vbo_offset);
+
+void
+glamor_put_vbo_space(ScreenPtr screen);
+
 /** 
  * Download a pixmap's texture to cpu memory. If success,
  * One copy of current pixmap's texture will be put into
@@ -934,10 +951,12 @@ void glamor_destroy_upload_pixmap(PixmapPtr pixmap);
 
 int glamor_create_picture(PicturePtr picture);
 
+void glamor_set_window_pixmap(WindowPtr pWindow, PixmapPtr pPixmap);
+
 Bool
 glamor_prepare_access_picture(PicturePtr picture, glamor_access_t access);
 
-void glamor_finish_access_picture(PicturePtr picture, glamor_access_t access);
+void glamor_finish_access_picture(PicturePtr picture);
 
 void glamor_destroy_picture(PicturePtr picture);
 
